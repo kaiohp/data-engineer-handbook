@@ -1,6 +1,15 @@
 DO $$
+DECLARE
+	start_year_for_backfill INT:= 1970;
+    end_year_for_backfill INT := 2021;
 BEGIN
-FOR ingest_year IN 1970..2021 LOOP
+FOR ingest_year IN start_year_for_backfill..end_year_for_backfill LOOP
+
+EXECUTE format(
+            'CREATE TABLE IF NOT EXISTS actors_y%s PARTITION OF actors FOR VALUES FROM (%s) TO (%s)',
+            ingest_year, ingest_year, ingest_year + 1
+        );
+
 INSERT INTO actors
 	WITH previous_year AS (
 		SELECT
@@ -15,7 +24,7 @@ INSERT INTO actors
 			actorid AS actor_id,
 			actor,
 			year,
-			ARRAY_AGG(ROW(filmid, film, year, votes, rating)::FILMS) AS films,
+			ARRAY_AGG(ROW(filmid, film, year, votes, rating)::FILMS ORDER BY year, rating) AS films,
 			AVG(rating) AS average_rating
 		FROM
 			actor_films
@@ -27,8 +36,8 @@ INSERT INTO actors
 			year
 	)
 	SELECT
-		coalesce(cy.actor_id, py.actor_id),
-		coalesce(cy.actor, py.actor),
+		COALESCE(cy.actor_id, py.actor_id),
+		COALESCE(cy.actor, py.actor),
 		CASE
 			WHEN py.films IS NULL
 				THEN COALESCE(cy.films, ARRAY[]::FILMS[])
@@ -44,7 +53,8 @@ INSERT INTO actors
 			ELSE
 				py.quality_class
 		END::QUALITY_CLASS AS quality_class,
-		cy.year IS NOT NULL as is_active,
+		COALESCE(cy.average_rating, py.average_rating) AS average_rating,
+		cy.year IS NOT NULL AS is_active,
 		COALESCE(cy.year, py.current_year + 1) AS current_year
 	FROM
 		current_year cy
